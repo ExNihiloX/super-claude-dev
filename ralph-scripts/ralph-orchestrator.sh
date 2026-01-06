@@ -97,22 +97,27 @@ show_status() {
     return
   fi
 
+  # Initialize state if needed
+  if [[ ! -f "$STATE_FILE" ]]; then
+    init_ralph
+  fi
+
   echo "=== Autonomous Developer Status ==="
   echo ""
 
-  # Project info
+  # Project info (from PRD - static)
   local project_name
   project_name=$(jq -r '.project // "Unknown"' "$PRD_FILE")
   echo "Project: $project_name"
   echo ""
 
-  # Feature counts
+  # Feature counts (from STATE_FILE - dynamic)
   local total pending in_progress completed blocked
-  total=$(jq -r '.features | length' "$PRD_FILE")
-  pending=$(jq -r '[.features[] | select(.status == "pending")] | length' "$PRD_FILE")
-  in_progress=$(jq -r '[.features[] | select(.status == "in_progress")] | length' "$PRD_FILE")
-  completed=$(jq -r '[.features[] | select(.status == "completed")] | length' "$PRD_FILE")
-  blocked=$(jq -r '[.features[] | select(.status == "blocked")] | length' "$PRD_FILE")
+  total=$(jq -r '.features | length' "$STATE_FILE")
+  pending=$(jq -r '[.features[] | select(.status == "pending")] | length' "$STATE_FILE")
+  in_progress=$(jq -r '[.features[] | select(.status == "in_progress")] | length' "$STATE_FILE")
+  completed=$(jq -r '[.features[] | select(.status == "completed")] | length' "$STATE_FILE")
+  blocked=$(jq -r '[.features[] | select(.status == "blocked")] | length' "$STATE_FILE")
 
   echo "Features: $completed/$total completed"
   echo "  - Pending: $pending"
@@ -127,17 +132,22 @@ show_status() {
   echo "Today's Cost: \$$daily_cost / \$$MAX_DAILY_COST_USD"
   echo ""
 
-  # In-progress details
+  # In-progress details (join state with specs for name)
   if [[ "$in_progress" -gt 0 ]]; then
     echo "In Progress:"
-    jq -r '.features[] | select(.status == "in_progress") | "  - \(.id): \(.name) (agent: \(.claimed_by))"' "$PRD_FILE"
+    jq -r --slurpfile specs "$PRD_FILE" '
+      .features[] | select(.status == "in_progress") |
+      . as $state |
+      ($specs[0].features[] | select(.id == $state.id)) as $spec |
+      "  - \(.id): \($spec.name) (agent: \(.claimed_by))"
+    ' "$STATE_FILE"
     echo ""
   fi
 
   # Blocked details
   if [[ "$blocked" -gt 0 ]]; then
     echo "⚠️  Blocked (needs human help):"
-    jq -r '.features[] | select(.status == "blocked") | "  - \(.id): \(.blocked_reason)"' "$PRD_FILE"
+    jq -r '.features[] | select(.status == "blocked") | "  - \(.id): \(.blocked_reason)"' "$STATE_FILE"
     echo ""
   fi
 
@@ -189,10 +199,10 @@ wait_for_completion() {
   while true; do
     sleep 30
 
-    # Check if we're done
+    # Check if we're done (read from STATE_FILE)
     local pending in_progress
-    pending=$(jq -r '[.features[] | select(.status == "pending")] | length' "$PRD_FILE" 2>/dev/null || echo 0)
-    in_progress=$(jq -r '[.features[] | select(.status == "in_progress")] | length' "$PRD_FILE" 2>/dev/null || echo 0)
+    pending=$(jq -r '[.features[] | select(.status == "pending")] | length' "$STATE_FILE" 2>/dev/null || echo 0)
+    in_progress=$(jq -r '[.features[] | select(.status == "in_progress")] | length' "$STATE_FILE" 2>/dev/null || echo 0)
 
     if [[ "$pending" == "0" && "$in_progress" == "0" ]]; then
       log "All features complete!"
@@ -217,11 +227,11 @@ wait_for_completion() {
       done
     fi
 
-    # Log periodic status
+    # Log periodic status (read from STATE_FILE)
     local completed
-    completed=$(jq -r '[.features[] | select(.status == "completed")] | length' "$PRD_FILE" 2>/dev/null || echo 0)
+    completed=$(jq -r '[.features[] | select(.status == "completed")] | length' "$STATE_FILE" 2>/dev/null || echo 0)
     local total
-    total=$(jq -r '.features | length' "$PRD_FILE" 2>/dev/null || echo 0)
+    total=$(jq -r '.features | length' "$STATE_FILE" 2>/dev/null || echo 0)
     log "Progress: $completed/$total features complete ($alive_agents agents active)"
   done
 }
@@ -265,9 +275,9 @@ run_orchestrator() {
   # Final status
   show_status
 
-  # Check for blocked features
+  # Check for blocked features (from STATE_FILE)
   local blocked
-  blocked=$(jq -r '[.features[] | select(.status == "blocked")] | length' "$PRD_FILE")
+  blocked=$(jq -r '[.features[] | select(.status == "blocked")] | length' "$STATE_FILE")
 
   if [[ "$blocked" -gt 0 ]]; then
     log_warn "$blocked features are blocked and need human attention"
