@@ -457,25 +457,44 @@ await_decision() {
 
   echo "Waiting for decision on Linear issue (up to ${max_hours}h)..." >&2
 
-  # Calculate iterations: each poll is ~2 min, so iterations = hours * 30
-  local max_iterations=$((max_hours * 30))
+  # Calculate iterations: each iteration waits poll_interval seconds
+  # For 6 hours with 30s intervals: 6 * 60 * 2 = 720 iterations
+  local max_iterations=$((max_hours * 120))
 
-  local response
-  response=$("$script_dir/ralph-poll-loop.sh" "$issue_id" "$since" "$max_iterations" 120 30 2>&1)
+  # Create temp files for stdout and stderr
+  local stdout_file stderr_file
+  stdout_file=$(mktemp)
+  stderr_file=$(mktemp)
 
-  # Check if we got a response
-  if [[ "$response" == *"RESPONSE_RECEIVED"* ]]; then
-    # Extract JSON from response
+  # Run poll loop, capturing stdout (JSON) and stderr (status) separately
+  "$script_dir/ralph-poll-loop.sh" "$issue_id" "$since" "$max_iterations" 120 30 \
+    >"$stdout_file" 2>"$stderr_file"
+  local exit_code=$?
+
+  # Show polling status to user
+  cat "$stderr_file" >&2
+
+  # Check if we got a response (exit code 0 means success)
+  if [[ $exit_code -eq 0 ]]; then
+    # stdout contains the JSON response
     local json
-    json=$(echo "$response" | sed -n '/RESPONSE_RECEIVED/,$ p' | tail -n +2)
+    json=$(cat "$stdout_file")
+
+    # Clean up temp files
+    rm -f "$stdout_file" "$stderr_file"
 
     # Extract the response body
     local body
-    body=$(echo "$json" | jq -r '.body')
+    body=$(echo "$json" | jq -r '.body // empty')
 
-    # Try to parse as number (option selection)
+    if [[ -z "$body" ]]; then
+      echo "ERROR: Could not parse response" >&2
+      return 1
+    fi
+
+    # Try to parse as number (option selection) - look for digits or letters like "b"
     local choice
-    choice=$(echo "$body" | grep -oE '^[0-9]+' | head -1)
+    choice=$(echo "$body" | grep -oE '^[0-9a-zA-Z]' | head -1)
 
     if [[ -n "$choice" ]]; then
       echo "$choice"
@@ -485,8 +504,10 @@ await_decision() {
     fi
 
     # Update status back to In Progress
-    update_status "$issue_id" "${LINEAR_STATE_IN_PROGRESS:-In Progress}" >/dev/null
+    update_status "$issue_id" "${LINEAR_STATE_IN_PROGRESS:-In Progress}" >/dev/null 2>&1 || true
   else
+    # Clean up temp files
+    rm -f "$stdout_file" "$stderr_file"
     echo "TIMEOUT"
     return 1
   fi
