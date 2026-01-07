@@ -11,6 +11,40 @@ set -euo pipefail
 source "$(dirname "$0")/ralph-config.sh"
 source "$(dirname "$0")/ralph-lock.sh"
 
+# Conditionally source Linear sync for Linear ID lookup
+if [[ "${USE_LINEAR:-1}" == "1" && -n "${LINEAR_API_KEY:-}" ]]; then
+  source "$(dirname "$0")/ralph-linear.sh" 2>/dev/null || true
+  source "$(dirname "$0")/ralph-linear-sync.sh" 2>/dev/null || true
+  USE_LINEAR_ACTIVE=1
+else
+  USE_LINEAR_ACTIVE=0
+fi
+
+# Smart notification - uses Linear or Slack based on config
+smart_notify() {
+  local message="$1"
+  local feature_id="${2:-}"
+  local linear_status="${3:-}"
+  local comment="${4:-}"
+
+  if [[ "$USE_LINEAR_ACTIVE" == "1" && -n "$feature_id" ]]; then
+    # Try to update Linear
+    local linear_id
+    linear_id=$(get_linear_id "$feature_id" 2>/dev/null || echo "")
+    if [[ -n "$linear_id" ]]; then
+      if [[ -n "$linear_status" ]]; then
+        update_status "$linear_id" "$linear_status" >/dev/null 2>&1 || true
+      fi
+      if [[ -n "$comment" ]]; then
+        add_comment "$linear_id" "$comment" >/dev/null 2>&1 || true
+      fi
+    fi
+  else
+    # Fall back to Slack
+    notify_slack "$message"
+  fi
+}
+
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
@@ -143,7 +177,7 @@ claim_feature() {
   release_lock "$lock_dir"
 
   log "Agent $agent_id claimed feature $feature_id"
-  notify_slack "🎯 Agent $agent_id claimed: $feature_id"
+  smart_notify "🎯 Agent $agent_id claimed: $feature_id" "$feature_id" "${LINEAR_STATE_IN_PROGRESS:-In Progress}" "🤖 **$agent_id** claimed this feature."
 
   echo "$feature_id"
   return 0
@@ -211,7 +245,7 @@ claim_next_feature() {
   release_lock "$lock_dir"
 
   log "Agent $agent_id claimed feature $feature_id (auto-selected)"
-  notify_slack "🎯 Agent $agent_id claimed: $feature_id"
+  smart_notify "🎯 Agent $agent_id claimed: $feature_id" "$feature_id" "${LINEAR_STATE_IN_PROGRESS:-In Progress}" "🤖 **$agent_id** claimed this feature."
 
   echo "$feature_id"
   return 0
@@ -242,7 +276,7 @@ release_claim() {
   release_lock "$lock_dir"
 
   log "Released claim on $feature_id: $reason"
-  notify_slack "⚠️ Released claim: $feature_id ($reason)"
+  smart_notify "⚠️ Released claim: $feature_id ($reason)" "$feature_id" "${LINEAR_STATE_TODO:-Todo}" "⚠️ Claim released: $reason"
 
   return 0
 }
@@ -277,7 +311,9 @@ complete_feature() {
   release_lock "$lock_dir"
 
   log "Feature completed: $feature_id"
-  notify_slack "✅ Feature completed: $feature_id ${pr_url:+- $pr_url}"
+  smart_notify "✅ Feature completed: $feature_id ${pr_url:+- $pr_url}" "$feature_id" "${LINEAR_STATE_IN_REVIEW:-In Review}" "✅ **Feature Complete!**${pr_url:+
+
+**Pull Request:** $pr_url}"
 
   return 0
 }
@@ -307,7 +343,11 @@ block_feature() {
   release_lock "$lock_dir"
 
   log_warn "Feature blocked: $feature_id - $reason"
-  notify_slack "🚫 BLOCKED: $feature_id - $reason (needs human help)"
+  smart_notify "🚫 BLOCKED: $feature_id - $reason (needs human help)" "$feature_id" "${LINEAR_STATE_BLOCKED:-Blocked}" "🚫 **Blocked**
+
+**Reason:** $reason
+
+Please help resolve this blocker."
 
   return 0
 }

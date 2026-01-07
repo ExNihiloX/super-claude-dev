@@ -78,7 +78,10 @@
         "Express server starts on PORT",
         "GET /health returns 200 OK",
         "Graceful shutdown on SIGTERM"
-      ]
+      ],
+      "linear_id": "b1f854db-9b85-4a55-be71-092f3e88b2a0",
+      "linear_key": "AURA-75",
+      "linear_url": "https://linear.app/aurataskai/issue/AURA-75/todo-001-express-server-setup-with-health-endpoint"
     },
     {
       "id": "todo-002",
@@ -96,7 +99,10 @@
         "TodoStore class with CRUD methods",
         "Generates UUID for new todos",
         "Returns null for non-existent todos"
-      ]
+      ],
+      "linear_id": "07af589c-2f95-4056-923a-a0eb28a4f532",
+      "linear_key": "AURA-76",
+      "linear_url": "https://linear.app/aurataskai/issue/AURA-76/todo-002-in-memory-todo-storage"
     },
     {
       "id": "todo-003",
@@ -117,7 +123,10 @@
         "Returns array of todos",
         "Returns empty array if no todos",
         "Response includes id, title, completed fields"
-      ]
+      ],
+      "linear_id": "a10f15a8-6117-4a7b-a55a-9e40e2e1f0cd",
+      "linear_key": "AURA-77",
+      "linear_url": "https://linear.app/aurataskai/issue/AURA-77/todo-003-get-apitodos-endpoint"
     },
     {
       "id": "todo-004",
@@ -139,7 +148,10 @@
         "Returns 400 if title missing",
         "Sets completed to false by default",
         "Returns created todo with id"
-      ]
+      ],
+      "linear_id": "4e8d8a26-6a8f-415c-a363-a4d52613637c",
+      "linear_key": "AURA-78",
+      "linear_url": "https://linear.app/aurataskai/issue/AURA-78/todo-004-post-apitodos-endpoint"
     },
     {
       "id": "todo-005",
@@ -160,7 +172,10 @@
         "Updates todo title and/or completed",
         "Returns 404 if todo not found",
         "Returns updated todo"
-      ]
+      ],
+      "linear_id": "d397db37-c0bd-4925-883d-1fe3a65ce4ad",
+      "linear_key": "AURA-79",
+      "linear_url": "https://linear.app/aurataskai/issue/AURA-79/todo-005-put-apitodosid-endpoint"
     },
     {
       "id": "todo-006",
@@ -181,7 +196,10 @@
         "Deletes todo by id",
         "Returns 404 if todo not found",
         "Returns success: true on delete"
-      ]
+      ],
+      "linear_id": "f275a260-c437-4ffb-a7e6-5641d1a9304e",
+      "linear_key": "AURA-80",
+      "linear_url": "https://linear.app/aurataskai/issue/AURA-80/todo-006-delete-apitodosid-endpoint"
     }
   ],
   "integration_tests": [

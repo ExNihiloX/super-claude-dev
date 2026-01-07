@@ -1,6 +1,6 @@
 # Super Claude Dev
 
-An autonomous development system that enables Claude to implement features in parallel, with async human collaboration via Slack.
+An autonomous development system that enables Claude to implement features in parallel, with async human collaboration via Linear (or Slack).
 
 ## Overview
 
@@ -9,11 +9,15 @@ Super Claude Dev turns a product idea into working code with minimal human inter
 1. **You describe** what you want to build
 2. **Claude analyzes** and creates a feature breakdown (PRD)
 3. **Multiple agents** implement features in parallel
-4. **Slack notifies** you when decisions are needed
+4. **Linear/Slack notifies** you when decisions are needed
 5. **You respond** from your phone - Claude continues
 6. **PRs are created** automatically for review
 
 Human role: Make judgment calls, approve PRs. That's it.
+
+## Current Status
+
+See [STATUS.md](STATUS.md) for the latest system state and next steps.
 
 ## Quick Start
 
@@ -28,7 +32,17 @@ npm install -g @anthropic-ai/claude-code
 gh auth status
 ```
 
-### Setup Slack (Optional but Recommended)
+### Setup Linear (Recommended)
+
+```bash
+# Add to ~/.zshrc
+export LINEAR_API_KEY="lin_api_your_key_here"
+export LINEAR_TEAM_ID="your-team-uuid-here"
+```
+
+See [LINEAR-SETUP.md](ralph-scripts/LINEAR-SETUP.md) for detailed instructions.
+
+### Setup Slack (Alternative)
 
 ```bash
 # Simple mode (notifications only)
@@ -86,8 +100,8 @@ cd /path/to/super-claude-dev
                   │
                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    SLACK INTEGRATION                             │
-│  Notifications → Human ← Responses                               │
+│                 LINEAR / SLACK INTEGRATION                       │
+│  Issue updates → Human ← Comments/Responses                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -103,6 +117,13 @@ cd /path/to/super-claude-dev
 | `ralph-claim.sh` | Atomic feature claiming |
 | `ralph-lock.sh` | Portable file locking |
 | `ralph-heartbeat.sh` | Stale claim recovery |
+
+### Linear Integration
+
+| Script | Purpose |
+|--------|---------|
+| `ralph-linear.sh` | Linear GraphQL API wrapper |
+| `ralph-linear-sync.sh` | Sync prd.json ↔ Linear issues |
 
 ### Slack Integration
 

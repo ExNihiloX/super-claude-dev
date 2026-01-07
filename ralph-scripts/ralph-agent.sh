@@ -7,8 +7,17 @@ set -euo pipefail
 source "$(dirname "$0")/ralph-config.sh"
 source "$(dirname "$0")/ralph-claim.sh"
 source "$(dirname "$0")/ralph-heartbeat.sh"
-source "$(dirname "$0")/ralph-notify.sh"
-source "$(dirname "$0")/ralph-decisions.sh"
+
+# Conditionally source Linear or Slack
+if [[ "${USE_LINEAR:-1}" == "1" && -n "${LINEAR_API_KEY:-}" ]]; then
+  source "$(dirname "$0")/ralph-linear.sh"
+  source "$(dirname "$0")/ralph-linear-sync.sh"
+  USE_LINEAR_ACTIVE=1
+else
+  source "$(dirname "$0")/ralph-notify.sh" 2>/dev/null || true
+  source "$(dirname "$0")/ralph-decisions.sh" 2>/dev/null || true
+  USE_LINEAR_ACTIVE=0
+fi
 
 # Export for decision functions
 export AGENT_ID
@@ -29,6 +38,132 @@ agent_log() {
   local msg="[$(date -Iseconds)] [$AGENT_ID] $1"
   echo "$msg" >> "$AGENT_LOG"
   log "$msg"
+}
+
+# =============================================================================
+# NOTIFICATION WRAPPERS (Linear or Slack)
+# =============================================================================
+
+# Notify that work started on a feature
+notify_feature_started() {
+  local feature_id="$1"
+  local name="$2"
+  local agent="$3"
+
+  if [[ "$USE_LINEAR_ACTIVE" == "1" ]]; then
+    local linear_id
+    linear_id=$(get_linear_id "$feature_id" 2>/dev/null || true)
+    if [[ -n "$linear_id" ]]; then
+      update_status "$linear_id" "$LINEAR_STATE_IN_PROGRESS" >/dev/null 2>&1 || true
+      add_comment "$linear_id" "🤖 **$agent** started working on this feature." >/dev/null 2>&1 || true
+    fi
+  else
+    notify_slack "🚀 *$agent* started: $name ($feature_id)"
+  fi
+}
+
+# Notify that a feature was completed
+notify_feature_completed() {
+  local feature_id="$1"
+  local name="$2"
+  local pr_url="${3:-}"
+  local stats="${4:-}"
+  local tests="${5:-}"
+
+  if [[ "$USE_LINEAR_ACTIVE" == "1" ]]; then
+    local linear_id
+    linear_id=$(get_linear_id "$feature_id" 2>/dev/null || true)
+    if [[ -n "$linear_id" ]]; then
+      update_status "$linear_id" "$LINEAR_STATE_IN_REVIEW" >/dev/null 2>&1 || true
+      local comment="✅ **Feature Complete!**
+
+${pr_url:+**Pull Request:** $pr_url}
+${stats:+**Changes:** $stats}
+${tests:+**Tests:** $tests}
+
+Ready for review."
+      add_comment "$linear_id" "$comment" >/dev/null 2>&1 || true
+    fi
+  else
+    notify_slack "✅ *$feature_id* complete! PR: $pr_url"
+  fi
+}
+
+# Notify that a feature is blocked
+notify_blocked() {
+  local feature_id="$1"
+  local reason="$2"
+  local agent="$3"
+
+  if [[ "$USE_LINEAR_ACTIVE" == "1" ]]; then
+    local linear_id
+    linear_id=$(get_linear_id "$feature_id" 2>/dev/null || true)
+    if [[ -n "$linear_id" ]]; then
+      update_status "$linear_id" "$LINEAR_STATE_BLOCKED" >/dev/null 2>&1 || true
+      add_comment "$linear_id" "🚫 **Blocked by $agent**
+
+**Reason:** $reason
+
+Please help resolve this blocker." >/dev/null 2>&1 || true
+    fi
+  else
+    notify_slack "🚫 *$feature_id* blocked: $reason (agent: $agent)"
+  fi
+}
+
+# Notify an error occurred
+notify_error() {
+  local error="$1"
+  local feature_id="$2"
+  local agent="$3"
+
+  if [[ "$USE_LINEAR_ACTIVE" == "1" ]]; then
+    local linear_id
+    linear_id=$(get_linear_id "$feature_id" 2>/dev/null || true)
+    if [[ -n "$linear_id" ]]; then
+      add_comment "$linear_id" "❌ **Error from $agent**
+
+$error" >/dev/null 2>&1 || true
+    fi
+  else
+    notify_slack "❌ Error in $feature_id: $error (agent: $agent)"
+  fi
+}
+
+# Request a decision from the human
+request_human_decision() {
+  local feature_id="$1"
+  local question="$2"
+  local options="$3"
+  local timeout="${4:-600}"
+
+  if [[ "$USE_LINEAR_ACTIVE" == "1" ]]; then
+    local linear_id
+    linear_id=$(get_linear_id "$feature_id" 2>/dev/null || true)
+    if [[ -n "$linear_id" ]]; then
+      # Convert comma-separated options to JSON array
+      local options_json
+      options_json=$(echo "$options" | tr ',' '\n' | jq -R . | jq -s .)
+
+      # Request decision and get timestamp
+      local since
+      since=$(request_decision "$linear_id" "$question" "$options_json")
+
+      # Wait for response
+      local answer
+      answer=$(await_decision "$linear_id" "$since" "$timeout")
+
+      echo "$answer"
+      return 0
+    fi
+  else
+    # Fall back to Slack-based decision if available
+    if type await_decision >/dev/null 2>&1; then
+      await_decision "$question" "$options" "Feature: $feature_id" "$timeout" ""
+    else
+      echo ""
+    fi
+  fi
 }
 
 # Build the prompt for Claude based on feature and project context
@@ -142,7 +277,7 @@ When the feature is fully implemented, tested, and a PR is created:
 If you need a decision from the human (architecture choice, unclear requirement):
 - Output: \`<promise>DECISION_NEEDED:Your question here|Option1,Option2,Option3</promise>\`
 - Example: \`<promise>DECISION_NEEDED:Which database should I use?|PostgreSQL,MySQL,SQLite</promise>\`
-- The human will respond via Slack and work will continue
+- The human will respond via Linear (issue comment) and work will continue
 
 If you encounter a blocker requiring human help:
 - Output: \`<promise>BLOCKED:$feature_id:reason here</promise>\`
@@ -195,7 +330,9 @@ run_feature_loop() {
     # Check budget
     if ! check_budget; then
       agent_log "Budget exceeded - pausing agent"
-      notify_slack "🚨 Agent $AGENT_ID paused: budget exceeded"
+      if [[ "$USE_LINEAR_ACTIVE" != "1" ]]; then
+        notify_slack "🚨 Agent $AGENT_ID paused: budget exceeded"
+      fi
       sleep 300
       continue
     fi
@@ -240,9 +377,9 @@ run_feature_loop() {
 
         agent_log "Decision needed for $feature_id: $question"
 
-        # Ask human via Slack and wait
+        # Ask human via Linear/Slack and wait
         local answer
-        answer=$(await_decision "$question" "$options" "Feature: $feature_id" 3600 "")
+        answer=$(request_human_decision "$feature_id" "$question" "$options" 3600)
 
         if [[ -n "$answer" ]]; then
           agent_log "Decision received: $answer"
@@ -311,13 +448,15 @@ run_agent() {
     if [[ -z "$feature_id" ]]; then
       # No features available - check if we're done
       local pending
-      pending=$(jq -r '[.features[] | select(.status == "pending")] | length' "$PRD_FILE" 2>/dev/null || echo 0)
+      pending=$(jq -r '[.features[] | select(.status == "pending")] | length' "$STATE_FILE" 2>/dev/null || echo 0)
       local in_progress
-      in_progress=$(jq -r '[.features[] | select(.status == "in_progress")] | length' "$PRD_FILE" 2>/dev/null || echo 0)
+      in_progress=$(jq -r '[.features[] | select(.status == "in_progress")] | length' "$STATE_FILE" 2>/dev/null || echo 0)
 
       if [[ "$pending" == "0" && "$in_progress" == "0" ]]; then
         agent_log "All features complete - agent exiting"
-        notify_slack "🎉 Agent $AGENT_ID: All features complete!"
+        if [[ "$USE_LINEAR_ACTIVE" != "1" ]]; then
+          notify_slack "🎉 Agent $AGENT_ID: All features complete!"
+        fi
         return 0
       fi
 
