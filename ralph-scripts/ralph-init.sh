@@ -218,7 +218,7 @@ This project uses the **Ralph Autonomous Development System** with three roles:
 When working autonomously, use Linear for human input:
 
 ```bash
-# When you need a decision:
+# When you need a decision (blocks until response):
 ./ralph-scripts/ralph-linear.sh decision "$ISSUE_ID" \
   "Description of what you need" \
   '["Option 1", "Option 2", "Option 3"]' \
@@ -230,6 +230,52 @@ This will:
 2. Post your question as a comment
 3. Poll for up to 6 hours for a response
 4. Parse the response and continue
+
+### Periodic Check-ins (IMPORTANT)
+
+**While working, check for user messages every few minutes:**
+
+```bash
+# Check if user commented (non-blocking)
+./ralph-scripts/ralph-checkin.sh "$ISSUE_ID" "$LAST_CHECKIN_TIME"
+```
+
+If user commented, respond to their message before continuing work.
+This allows the user to:
+- Ask for status updates
+- Change direction mid-task
+- Provide additional context
+- Interrupt long-running work
+
+### State Persistence (CRITICAL)
+
+**Always save state so work can resume if session crashes:**
+
+```bash
+# 1. Initialize state at start of task
+./ralph-scripts/ralph-state.sh init "$ISSUE_ID" "Task description"
+
+# 2. Update progress as you work
+./ralph-scripts/ralph-state.sh progress "in_progress" "Working on user routes"
+
+# 3. Mark steps complete
+./ralph-scripts/ralph-state.sh complete "Created user model"
+
+# 4. Post heartbeat every 10-15 min during long work
+./ralph-scripts/ralph-heartbeat-linear.sh "$ISSUE_ID"
+
+# 5. Clear state when task is done
+./ralph-scripts/ralph-state.sh clear
+```
+
+**On startup, always check for recoverable session:**
+
+```bash
+if [[ $(./ralph-scripts/ralph-state.sh has-session) == "true" ]]; then
+  ./ralph-scripts/ralph-resume.sh
+  # Resume from where you left off
+fi
+```
 
 ## Workflow Commands
 
