@@ -101,6 +101,37 @@ describe('Todo API', () => {
         .delete('/api/todos/non-existent');
 
       expect(res.status).toBe(404);
+      expect(res.body.error).toBe('Todo not found');
+    });
+
+    it('removes todo from list after deletion', async () => {
+      const todo = todosRouter.store.create('To delete');
+
+      await request(app).delete(`/api/todos/${todo.id}`);
+
+      const listRes = await request(app).get('/api/todos');
+      expect(listRes.body.todos).toHaveLength(0);
+    });
+
+    it('only deletes specified todo', async () => {
+      const todo1 = todosRouter.store.create('Keep this');
+      const todo2 = todosRouter.store.create('Delete this');
+
+      await request(app).delete(`/api/todos/${todo2.id}`);
+
+      const listRes = await request(app).get('/api/todos');
+      expect(listRes.body.todos).toHaveLength(1);
+      expect(listRes.body.todos[0].id).toBe(todo1.id);
+    });
+
+    it('cannot delete same todo twice', async () => {
+      const todo = todosRouter.store.create('Delete once');
+
+      const firstDelete = await request(app).delete(`/api/todos/${todo.id}`);
+      expect(firstDelete.status).toBe(200);
+
+      const secondDelete = await request(app).delete(`/api/todos/${todo.id}`);
+      expect(secondDelete.status).toBe(404);
     });
   });
 });
